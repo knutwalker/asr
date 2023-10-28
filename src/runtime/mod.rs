@@ -8,6 +8,41 @@ mod sys;
 pub mod settings;
 pub mod timer;
 
+#[macro_export]
+/// Prints a message to the log using the same formatting syntax as `format!`.
+macro_rules! msg {
+    ($($arg:tt)*) => {{
+        let mut buf = $crate::arrayvec::ArrayString::<8192>::new();
+        let _ = ::core::fmt::Write::write_fmt(
+            &mut buf,
+            ::core::format_args!($($arg)*),
+        );
+        $crate::print_message(&buf);
+    }};
+}
+
+/// Same as `::std::dbg!` but available in `no_std` by redirecting to `msg!`
+#[macro_export]
+macro_rules! dbg {
+    () => {
+        $crate::msg!("[{}:{}]", ::core::file!(), ::core::line!())
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                $crate::msg!("[{}:{}] {} = {:?}",
+                    ::core::file!(), ::core::line!(), ::core::stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg!($val)),+,)
+    };
+}
+
 /// An error returned by a runtime function.
 #[derive(Debug)]
 #[non_exhaustive]
