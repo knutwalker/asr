@@ -607,6 +607,22 @@ impl<const CAP: usize> UnityPointer<CAP> {
             .deref_offsets(process)
     }
 
+    /// Dereferences the pointer path, starting from the given `base_address`,
+    /// returning the memory address of the value of interest
+    pub fn deref_offsets_from(
+        &self,
+        process: &Process,
+        module: &Module,
+        image: &Image,
+        base_address: impl Into<Address>,
+    ) -> Result<Address, Error> {
+        self.find_offsets(process, module, image)?;
+        self.deep_pointer
+            .get()
+            .ok_or(Error {})?
+            .deref_offsets_from(process, base_address)
+    }
+
     /// Dereferences the pointer path, returning the value stored at the final memory address
     pub fn deref<T: CheckedBitPattern>(
         &self,
@@ -616,6 +632,22 @@ impl<const CAP: usize> UnityPointer<CAP> {
     ) -> Result<T, Error> {
         self.find_offsets(process, module, image)?;
         self.deep_pointer.get().ok_or(Error {})?.deref(process)
+    }
+
+    /// Dereferences the pointer path, starting from the given `base_address`,
+    /// returning the value stored at the final memory address
+    pub fn deref_from<T: CheckedBitPattern>(
+        &self,
+        process: &Process,
+        module: &Module,
+        image: &Image,
+        base_address: impl Into<Address>,
+    ) -> Result<T, Error> {
+        self.find_offsets(process, module, image)?;
+        self.deep_pointer
+            .get()
+            .ok_or(Error {})?
+            .deref_from(process, base_address)
     }
 
     /// Recovers the `DeepPointer` struct contained inside this `UnityPointer`,

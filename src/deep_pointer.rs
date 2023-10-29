@@ -51,9 +51,29 @@ impl<const CAP: usize> DeepPointer<CAP> {
         Self::new(base_address, DerefType::Bit64, path)
     }
 
+    /// Returns a new pointer path with a changed base address,
+    /// but otherwise the same path.
+    pub fn with_base_address(&self, base_address: impl Into<Address>) -> Self {
+        Self {
+            base_address: base_address.into(),
+            path: self.path.clone(),
+            deref_type: self.deref_type,
+        }
+    }
+
     /// Dereferences the pointer path, returning the memory address of the value of interest
     pub fn deref_offsets(&self, process: &Process) -> Result<Address, Error> {
-        let mut address = self.base_address;
+        self.deref_offsets_from(process, self.base_address)
+    }
+
+    /// Dereferences the pointer path, starting from the provided `base_address`,
+    /// returning the memory address of the value of interest
+    pub fn deref_offsets_from(
+        &self,
+        process: &Process,
+        base_address: impl Into<Address>,
+    ) -> Result<Address, Error> {
+        let mut address = base_address.into();
         let (&last, path) = self.path.split_last().ok_or(Error {})?;
         for &offset in path {
             address = match self.deref_type {
@@ -67,6 +87,16 @@ impl<const CAP: usize> DeepPointer<CAP> {
     /// Dereferences the pointer path, returning the value stored at the final memory address
     pub fn deref<T: CheckedBitPattern>(&self, process: &Process) -> Result<T, Error> {
         process.read(self.deref_offsets(process)?)
+    }
+
+    /// Dereferences the pointer path, starting from the provided `base_address`,
+    /// returning the value stored at the final memory address
+    pub fn deref_from<T: CheckedBitPattern>(
+        &self,
+        process: &Process,
+        base_address: impl Into<Address>,
+    ) -> Result<T, Error> {
+        process.read(self.deref_offsets_from(process, base_address)?)
     }
 }
 
