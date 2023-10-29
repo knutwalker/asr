@@ -74,6 +74,9 @@ impl<const CAP: usize> DeepPointer<CAP> {
         base_address: impl Into<Address>,
     ) -> Result<Address, Error> {
         let mut address = base_address.into();
+        if address.is_null() {
+            return Err(Error {});
+        }
         let (&last, path) = self.path.split_last().ok_or(Error {})?;
         for &offset in path {
             address = match self.deref_type {

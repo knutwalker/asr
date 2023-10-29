@@ -555,9 +555,9 @@ impl<const CAP: usize> UnityPointer<CAP> {
                     .nth(parent_idx)
                     .ok_or(Error {})?;
 
-                base_address = base_class
-                    .get_static_table(process, module)
-                    .ok_or(Error {})?;
+                if let Some(static_table) = base_class.get_static_table(process, module) {
+                    base_address = static_table;
+                }
             }
 
             // In every iteration of the loop, except the last one, we then need to find the Class address for the next offset
