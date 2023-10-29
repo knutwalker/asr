@@ -10,7 +10,7 @@ use crate::{Address, Address32, Address64, Error, Process};
 /// The maximum depth of the pointer path is given by the generic parameter `CAP`.
 /// Of note, `CAP` must be higher or equal to the number of offsets provided in `path`,
 /// otherwise calling `new()` on this struct will trigger a ***Panic***.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeepPointer<const CAP: usize> {
     base_address: Address,
     path: ArrayVec<u64, CAP>,
@@ -101,7 +101,7 @@ impl<const CAP: usize> DeepPointer<CAP> {
 }
 
 /// Describes the pointer size that should be used while deferecencing a pointer path
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub enum DerefType {
     /// 4-byte pointer size, used in 32bit processes
     Bit32,
