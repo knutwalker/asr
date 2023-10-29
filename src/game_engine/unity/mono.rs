@@ -358,6 +358,19 @@ impl Class {
         })
     }
 
+    /// Returns in iterator over the class hierarchy.
+    /// The first value is always the class itself, followed by its parent,
+    /// then its parent's parent, and so on.
+    fn hierarchy<'a>(
+        &self,
+        process: &'a Process,
+        module: &'a Module,
+    ) -> impl Iterator<Item = Class> + 'a {
+        core::iter::successors(Some(Class { class: self.class }), move |m| {
+            m.get_parent(process, module)
+        })
+    }
+
     /// Tries to find the offset for a field with the specified name in the class.
     /// If it's a static field, the offset will be from the start of the static
     /// table.
@@ -514,7 +527,6 @@ impl Field {
 pub struct UnityPointer<const CAP: usize> {
     deep_pointer: OnceCell<DeepPointer<CAP>>,
     class_name: ArrayString<CSTR>,
-    nr_of_parents: u8,
     fields: ArrayVec<ArrayString<CSTR>, CAP>,
 }
 
@@ -524,13 +536,12 @@ impl<const CAP: usize> UnityPointer<CAP> {
     /// `CAP` must be higher or equal to the number of offsets defined in `fields`.
     ///
     /// If `CAP` is set to a value lower than the number of the offsets to be dereferenced, this function will ***Panic***
-    pub fn new(class_name: &str, nr_of_parents: u8, fields: &[&str]) -> Self {
+    pub fn new(class_name: &str, fields: &[&str]) -> Self {
         assert!(!fields.is_empty() && fields.len() <= CAP);
 
         Self {
             deep_pointer: OnceCell::new(),
             class_name: ArrayString::from(class_name).unwrap_or_default(),
-            nr_of_parents,
             fields: fields
                 .iter()
                 .map(|&val| ArrayString::from(val).unwrap_or_default())
@@ -549,55 +560,51 @@ impl<const CAP: usize> UnityPointer<CAP> {
             .get_class(process, module, &self.class_name)
             .ok_or(Error {})?;
 
-        for _ in 0..self.nr_of_parents {
-            current_class = current_class.get_parent(process, module).ok_or(Error {})?;
-        }
-
-        let static_table = current_class
-            .get_static_table(process, module)
-            .ok_or(Error {})?;
+        let mut base_address = Address::NULL;
 
         let mut offsets: ArrayVec<u64, CAP> = ArrayVec::new();
 
-        for (i, &field_name) in self.fields.iter().enumerate() {
+        for (i, field_name) in self.fields.iter().enumerate() {
             // Try to parse the offset, passed as a string, as an actual hex or decimal value
-            let offset_from_string = {
-                let mut temp_val = None;
-
-                if field_name.starts_with("0x") && field_name.len() > 2 {
-                    if let Some(hex_val) = field_name.get(2..field_name.len()) {
-                        if let Ok(val) = u32::from_str_radix(hex_val, 16) {
-                            temp_val = Some(val)
-                        }
-                    }
-                } else if let Ok(val) = field_name.parse::<u32>() {
-                    temp_val = Some(val)
-                }
-                temp_val
-            };
+            let field_offset = field_name
+                .strip_prefix("0x")
+                .and_then(|hex_val| u32::from_str_radix(hex_val, 16).ok())
+                .or_else(|| field_name.parse().ok());
 
             // Then we try finding the MonoClassField of interest, which is needed if we only provided the name of the field,
             // and will be needed anyway when looking for the next offset.
-            let target_field = current_class
-                .fields(process, module)
-                .find(|field| {
-                    if let Some(val) = offset_from_string {
-                        field
-                            .get_offset(process, module)
-                            .is_some_and(|offset| offset == val)
-                    } else {
-                        field
-                            .get_name::<CSTR>(process, module)
-                            .is_ok_and(|name| name.matches(field_name.as_ref()))
-                    }
+            let (parent_idx, target_field) = current_class
+                .hierarchy(process, module)
+                .enumerate()
+                .flat_map(move |(i, class)| {
+                    class.fields(process, module).map(move |field| (i, field))
+                })
+                .find(|(_, field)| match field_offset {
+                    Some(val) => field
+                        .get_offset(process, module)
+                        .is_some_and(|offset| offset == val),
+                    None => field
+                        .get_name::<CSTR>(process, module)
+                        .is_ok_and(|name| name.matches(field_name.as_ref())),
                 })
                 .ok_or(Error {})?;
 
-            offsets.push(if let Some(val) = offset_from_string {
-                val
-            } else {
-                target_field.get_offset(process, module).ok_or(Error {})?
-            } as u64);
+            let field_offset = field_offset
+                .or_else(|| target_field.get_offset(process, module))
+                .ok_or(Error {})?;
+
+            offsets.push(field_offset as u64);
+
+            if i == 0 {
+                let base_class = current_class
+                    .hierarchy(process, module)
+                    .nth(parent_idx)
+                    .ok_or(Error {})?;
+
+                base_address = base_class
+                    .get_static_table(process, module)
+                    .ok_or(Error {})?;
+            }
 
             // In every iteration of the loop, except the last one, we then need to find the Class address for the next offset
             if i != self.fields.len() - 1 {
@@ -610,7 +617,7 @@ impl<const CAP: usize> UnityPointer<CAP> {
         }
 
         let pointer = DeepPointer::new(
-            static_table,
+            base_address,
             if module.is_64_bit {
                 DerefType::Bit64
             } else {
